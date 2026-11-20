@@ -60,7 +60,7 @@ jobs:
 
       - name: Build APK
         run: |
-          flet build apk --verbose --yes
+          flet build apk --verbose --yes --arch arm64-v8a
 
       - name: Verify APK
         run: |
