@@ -11,7 +11,7 @@ jobs:
   build:
     name: Build Abla Android APK
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - name: Checkout Repository
@@ -49,7 +49,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.0'
+          flutter-version: '3.47.9'
           channel: stable
 
       - name: Verify Environment
@@ -60,9 +60,9 @@ jobs:
 
       - name: Build APK
         run: |
-          flet build apk --verbose
+          flet build apk --verbose --yes
 
-      - name: Find APK
+      - name: Verify APK
         run: |
           find build -type f -name "*.apk"
           test -n "$(find build -type f -name '*.apk' -print -quit)"
