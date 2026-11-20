@@ -39,6 +39,8 @@ jobs:
         with:
           accept-android-sdk-licenses: true
 
+      # الحل السحري: بنقبل التراخيص بالقوة ونتجاهل أي خطأ
+      # (عشان sdkmanager بيقفل الـ pipe فبيطلع error، بنتجاهله بـ || true)
       - name: Accept Android Licenses
         run: |
           yes | sdkmanager --licenses || true
@@ -47,6 +49,7 @@ jobs:
         env:
           NO_COLOR: "1"
           TERM: "dumb"
+          FLET_CLI_NO_RICH_OUTPUT: "1"
         run: |
           flet build apk --verbose
 
