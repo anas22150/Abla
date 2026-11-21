@@ -151,14 +151,14 @@ def main(page: ft.Page):
             label=ar("تصفية حسب الصف"),
             value="الكل",
             options=[ft.dropdown.Option("الكل")] + [ft.dropdown.Option(g) for g in grades],
-            on_change=lambda e: refresh_list(),
+            on_select=lambda e: refresh_list(),
             expand=True,
         )
         payment_filter = ft.Dropdown(
             label=ar("حالة الدفع"),
             value="الكل",
             options=[ft.dropdown.Option("الكل"), ft.dropdown.Option("دفعوا"), ft.dropdown.Option("لم يدفعوا")],
-            on_change=lambda e: refresh_list(),
+            on_select=lambda e: refresh_list(),
             expand=True,
         )
         result_count = ft.Text("", size=12, color=TEXT_MUTED)
@@ -176,6 +176,158 @@ def main(page: ft.Page):
                     ], spacing=2, expand=True),
                     ft.Column([
                         ft.Text(ar("مدفوع" if is_paid else "مطلوب"), size=11, color=GREEN if is_paid else RED, weight=ft.FontWeight.BOLD),
+                        ft.Button(ar("فتح"), bgcolor=PURPLE, on_click=lambda e, sid=student["id"]: show_student_detail(sid)),
+                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=3),
+                ], spacing=8),
+                bgcolor=CARD_BG, padding=10, border_radius=12,
+            )
+
+        def refresh_list():
+            query = (search.value or "").strip().casefold()
+            selected_grade = grade_filter.value or "الكل"
+            selected_payment = payment_filter.value or "الكل"
+            filtered = []
+            for student in all_students:
+                searchable = " ".join(str(student.get(k) or "") for k in ("name", "code", "phone", "year")).casefold()
+                if query and query not in searchable:
+                    continue
+                if selected_grade != "الكل" and str(student.get("year")) != selected_grade:
+                    continue
+                paid_now = student["id"] in paid_ids
+                if selected_payment == "دفعوا" and not paid_now:
+                    continue
+                if selected_payment == "لم يدفعوا" and paid_now:
+                    continue
+                filtered.append(student)
+            result_count.value = ar(f"النتائج: {len(filtered)} من أصل {len(all_students)} طالب")
+            list_column.controls.clear()
+            if not filtered:
+                list_column.controls.append(ft.Container(
+                    content=ft.Column([
+                        ft.Icon(ft.Icons.PERSON_SEARCH, size=48, color=TEXT_MUTED),
+                        ft.Text(ar("لا توجد نتائج مطابقة"), color=TEXT_MUTED, size=14),
+                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                    padding=30, bgcolor=CARD_BG, border_radius=12,
+                ))
+            else:
+                for student in sorted(filtered, key=lambda x: (str(x.get("year", "")), str(x.get("name", "")))):
+                    list_column.controls.append(student_card(student))
+            page.update()
+
+        page.views.append(ft.View(
+            route="/students", bgcolor=BG, padding=0,
+            controls=[
+                make_header("إدارة الطلاب", PURPLE, back=lambda e: show_home(), actions=[
+                    ft.IconButton(ft.Icons.PERSON_ADD, icon_color="white", tooltip=ar("إضافة طالب"), on_click=lambda e: show_add_student())
+                ]),
+                ft.Container(content=ft.Column([
+                    ft.Row([search], spacing=8),
+                    ft.Row([grade_filter, payment_filter], spacing=8),
+                    ft.Row([
+                        ft.Container(content=ft.Text(ar(f"إجمالي الطلاب: {len(all_students)}"), color=BLUE, weight=ft.FontWeight.BOLD), bgcolor="#DBEAFE", padding=9, border_radius=9),
+                        ft.Container(content=ft.Text(ar(f"دفعوا: {len(paid_ids)}"), color=GREEN, weight=ft.FontWeight.BOLD), bgcolor="#D1FAE5", padding=9, border_radius=9),
+                    ], wrap=True),
+                    result_count,
+                    list_column,
+                    ft.Button(ar("＋ إضافة طالب جديد"), icon=ft.Icons.ADD, bgcolor=PINK, color="white", on_click=lambda e: show_add_student(), width=400),
+                ], spacing=9, expand=True), padding=12, expand=True)
+            ]
+        ))
+        refresh_list()
+
+    # ADD
+    def show_add_student():
+        page.views.clear()
+        name, year = ft.TextField(label=ar("اسم الطالب"), width=500), ft.TextField(label=ar("الصف"), width=500)
+        fee, phone = ft.TextField(label=ar("الرسوم"), value="120", width=500, keyboard_type=ft.KeyboardType.NUMBER), ft.TextField(label=ar("التليفون"), width=500)
+        err = ft.Text("", color=RED, size=13)
+        def save(e):
+            if not (name.value or "").strip() or not (year.value or "").strip():
+                err.value = ar("❌ اكتب الاسم والصف")
+                page.update()
+                return
+            try: f = float(fee.value or 0)
+            except: f = 0
+            db.add_student(name.value.strip(), year.value.strip(), f, (phone.value or "").strip())
+            snack("✅ تم الحفظ")
+            show_students()
+        page.views.append(ft.View(route="/add", bgcolor=BG, padding=0, controls=[make_header("إضافة طالب", PINK, back=lambda e: show_home()), ft.Container(content=ft.Column([name, year, fee, phone, err, ft.Container(height=10), ft.Row([ft.Button(ar("حفظ"), bgcolor=GREEN, expand=True, height=50, on_click=save, style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=12))), ft.Button(ar("إلغاء"), bgcolor=TEXT_MUTED, expand=True, height=50, on_click=lambda e: show_home())], spacing=10)], spacing=10), padding=20, bgcolor=CARD_BG, border_radius=16, width=550)]))
+        page.update()
+
+    # EDIT STUDENT
+    def show_edit_student(sid):
+        page.views.clear()
+        student = db.get_student_by_id(sid)
+        if not student:
+            show_students()
+            return
+        name = ft.TextField(label=ar("اسم الطالب"), value=student.get("name", ""), expand=True)
+        year = ft.TextField(label=ar("الصف الدراسي"), value=student.get("year", ""), expand=True)
+        fee = ft.TextField(label=ar("المصروف الشهري"), value=str(student.get("fee", 0)), keyboard_type=ft.KeyboardType.NUMBER, expand=True)
+        phone = ft.TextField(label=ar("رقم الهاتف"), value=student.get("phone", ""), keyboard_type=ft.KeyboardType.PHONE, expand=True)
+        error = ft.Text("", color=RED, size=12)
+        def save_edit(e):
+            if not (name.value or "").strip() or not (year.value or "").strip():
+                error.value = ar("الاسم والصف مطلوبان")
+                page.update()
+                return
+            try:
+                amount = float((fee.value or "0").replace(",", "."))
+                if amount < 0: raise ValueError()
+            except Exception:
+                error.value = ar("اكتب قيمة رسوم صحيحة")
+                page.update()
+                return
+            db.update_student(sid, name.value.strip(), year.value.strip(), amount, (phone.value or "").strip())
+            snack("تم تحديث بيانات الطالب")
+            show_student_detail(sid)
+        page.views.append(ft.View(route="/edit", bgcolor=BG, padding=0, controls=[
+            make_header("تعديل بيانات الطالب", PURPLE, back=lambda e: show_student_detail(sid)),
+            ft.Container(content=ft.Column([
+                ft.Text(ar(f'كود الطالب: {student["code"]}'), color=TEXT_MUTED, size=12),
+                name, year, fee, phone, error,
+                ft.Button(ar("حفظ التعديلات"), icon=ft.Icons.SAVE, bgcolor=GREEN, color="white", on_click=save_edit, width=400, height=48),
+                ft.Button(ar("رجوع بدون حفظ"), on_click=lambda e: show_student_detail(sid), width=400),
+            ], spacing=12), padding=18, bgcolor=CARD_BG, border_radius=14, expand=True)
+        ]))
+        page.update()
+
+    # DETAIL
+    def show_student_detail(sid):
+        page.views.clear()
+        s = db.get_student_by_id(sid)
+        if not s: show_students(); return
+        tm, ty = get_target_month()
+        payments = db.get_payments_for_student(sid, ty)
+        paid_months = {p['month'] for p in payments}
+        payload = json.dumps({"code": s['code'], "name": s['name'], "year": s['year'], "fee": s['fee']}, ensure_ascii=False)
+        def toggle(m):
+            def h(e):
+                db.toggle_payment(sid, m, ty, s['fee'])
+                show_student_detail(sid)
+            return h
+        month_rows = []
+        for start in range(1, 13, 4):
+            row_items = []
+            for m in range(start, min(start+4, 13)):
+                is_p, is_t = m in paid_months, (m == tm)
+                col = GREEN if is_p else (AMBER if is_t else "#E2E8F0")
+                status = "✓ دفع" if is_p else ("مطلوب" if is_t else "—")
+                row_items.append(ft.Container(content=ft.Text(ar(f"{MONTHS[m-1]}\n{status}"), size=11, color="white" if (is_p or is_t) else TEXT_DARK, text_align=ft.TextAlign.CENTER, weight=ft.FontWeight.BOLD), bgcolor=col, padding=8, border_radius=8, expand=True, on_click=toggle(m), ink=True, height=60, alignment=ft.Alignment(0, 0)))
+            month_rows.append(ft.Row(row_items, spacing=6))
+        def show_qr(e):
+            def close(e2): dlg.open = False; page.update()
+            dlg = ft.AlertDialog(title=ft.Text(ar("كود QR"), color=PINK), content=ft.Column([ft.Text(ar(s['name']), size=16, weight=ft.FontWeight.BOLD), ft.Image(src=make_qr_data_url(payload), width=280, height=280)], horizontal_alignment=ft.CrossAxisAlignment.CENTER), actions=[ft.TextButton(ar("إغلاق"), on_click=close)])
+            page.overlay.append(dlg)
+            dlg.open = True
+            page.update()
+        page.views.append(ft.View(route="/detail", bgcolor=BG, padding=0, controls=[make_header(s['name'], PINK, back=lambda e: show_students(), actions=[ft.IconButton(ft.Icons.EDIT, icon_color="white", tooltip=ar("تعديل البيانات"), on_click=lambda e: show_edit_student(sid)), ft.IconButton(ft.Icons.QR_CODE, icon_color="white", tooltip=ar("عرض QR"), on_click=show_qr)]), ft.Container(content=ft.Column([ft.Container(content=ft.Column([ft.Text(ar(f"الكود: {s['code']}"), size=12, color=TEXT_MUTED), ft.Text(ar(f"الصف: {s['year']}"), size=14, weight=ft.FontWeight.BOLD, color=TEXT_DARK), ft.Text(ar(f"الرسوم: {int(s['fee'])} ج/شهر"), size=14, color=PINK)], spacing=4), padding=14, bgcolor=CARD_BG, border_radius=12), ft.Container(height=8), ft.Text(ar(f"💰 مدفوعات {ty}"), size=15, weight=ft.FontWeight.BOLD, color=PINK), *month_rows], spacing=8, scroll=ft.ScrollMode.AUTO, expand=True), padding=16, expand=True)]))
+        page.update()
+
+    # SCANNER
+    def show_scanner():
+        page.views.clear()
+        page.views.append(ft.View(route="/scan", bgcolor=BG, padding=0, controls=[make_header("مسح QR", GREEN, back=lambda e: show_home()), ft.Container(content=ft.Column([ft.Icon(ft.Icons.PHOTO_CAMERA_OUTLINED, size=100, color=TEXT_MUTED), ft.Contae=11, color=GREEN if is_paid else RED, weight=ft.FontWeight.BOLD),
                         ft.Button(ar("فتح"), bgcolor=PURPLE, on_click=lambda e, sid=student["id"]: show_student_detail(sid)),
                     ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=3),
                 ], spacing=8),
